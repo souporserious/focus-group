@@ -1,12 +1,21 @@
 function FocusGroup(options) {
+  var emitter = mitt()
+
+  this.on = emitter.on;
+  this.emit = emitter.emit;
+  this.off = emitter.off;
+
   options = options || {};
   var userKeybindings = options.keybindings || {};
   this._settings = {
+    rootNode: options.rootNode || document,
+    initialIndex: options.initialIndex || 0,
     keybindings: {
       next: (userKeybindings.next) || { keyCode: 40 },
       prev: (userKeybindings.prev) || { keyCode: 38 },
       first: userKeybindings.first,
       last: userKeybindings.last,
+      select: userKeybindings.select || { keyCode: 13 },
     },
     wrap: options.wrap,
     stringSearch: options.stringSearch,
@@ -32,6 +41,8 @@ function FocusGroup(options) {
     }.bind(this));
   }
 
+  this._rootNode = this._settings.rootNode;
+  this._activeIndex = this._settings.initialIndex;
   this._searchString = '';
   this._members = [];
   if (options.members) this.setMembers(options.members);
@@ -40,14 +51,18 @@ function FocusGroup(options) {
 
 FocusGroup.prototype.activate = function() {
   // Use capture in case other libraries might grab it first -- i.e. React
-  document.addEventListener('keydown', this._boundHandleKeydownEvent, true);
+  this._rootNode.addEventListener('keydown', this._boundHandleKeydownEvent, true);
   return this;
 };
 
 FocusGroup.prototype.deactivate = function() {
-  document.removeEventListener('keydown', this._boundHandleKeydownEvent, true);
+  this._rootNode.removeEventListener('keydown', this._boundHandleKeydownEvent, true);
   this._clearSearchStringRefreshTimer();
   return this;
+};
+
+FocusGroup.prototype.setRootNode = function(node) {
+  this._rootNode = node;
 };
 
 FocusGroup.prototype._handleKeydownEvent = function(event) {
@@ -74,6 +89,9 @@ FocusGroup.prototype._handleKeydownEvent = function(event) {
         break;
       case 'last':
         this.moveFocusToLast();
+        break;
+      case 'select':
+        this.selectActiveElement();
         break;
       default: return;
     }
@@ -118,6 +136,10 @@ FocusGroup.prototype.moveFocusToFirst = function() {
 
 FocusGroup.prototype.moveFocusToLast = function() {
   this.focusNodeAtIndex(this._members.length - 1);
+};
+
+FocusGroup.prototype.selectActiveElement = function() {
+  this.emit('select', this.getActiveMember())
 };
 
 FocusGroup.prototype._handleUnboundKey = function(event) {
@@ -191,12 +213,16 @@ FocusGroup.prototype._findIndexOfNode = function(searchNode) {
 };
 
 FocusGroup.prototype._getActiveElementIndex = function() {
-  return this._findIndexOfNode(document.activeElement);
+  return this._rootNode !== document
+    ? this._activeIndex
+    : this._findIndexOfNode(document.activeElement);
 };
 
 FocusGroup.prototype.focusNodeAtIndex = function(index) {
   var member = this._members[index];
   if (member) focusNode(member.node);
+  this._activeIndex = index;
+  this.emit('focus', member)
   return this;
 };
 
@@ -208,8 +234,11 @@ FocusGroup.prototype.addMember = function(memberData, index) {
 
   var cleanedNodeText = nodeText.replace(/[\W_]/g, '').toLowerCase();
   var member = {
+    id: memberData.id,
+    index: index,
     node: node,
     text: cleanedNodeText,
+    value: memberData.value
   };
 
   if (index !== null && index !== undefined) {
@@ -244,6 +273,10 @@ FocusGroup.prototype.setMembers = function(nextMembers) {
 
 FocusGroup.prototype.getMembers = function() {
   return this._members;
+};
+
+FocusGroup.prototype.getActiveMember = function() {
+  return this._members[this._getActiveElementIndex()];
 };
 
 FocusGroup.prototype._checkNode = function(node) {
